@@ -31,12 +31,12 @@ struct TurnView: View {
                 }
                 Text(turn.prompt)
                     .font(.system(size: 15))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.ink)
                     .multilineTextAlignment(.trailing)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(
-                        (turn.isSteer ? Theme.steer.opacity(0.16) : Color(white: 0.16)),
+                        (turn.isSteer ? Theme.accentSoft : Theme.raised),
                         in: RoundedRectangle(cornerRadius: 18, style: .continuous)
                     )
                     .overlay(
@@ -57,11 +57,11 @@ struct TurnView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.text)
                     .font(.system(size: 14, weight: weight(event.kind)))
-                    .foregroundStyle(event.kind == .reasoning ? Theme.dim : .white)
+                    .foregroundStyle(event.kind == .reasoning ? Theme.dim : Theme.ink)
                 if let detail = event.detail {
                     Text(detail)
                         .font(.system(size: 11))
-                        .foregroundStyle(event.kind == .error ? .orange.opacity(0.9) : Theme.dim)
+                        .foregroundStyle(event.kind == .error ? Theme.warn : Theme.dim)
                 }
             }
             Spacer(minLength: 0)
@@ -78,12 +78,12 @@ struct TurnView: View {
 
     private func tint(_ kind: BuildEvent.Kind) -> Color {
         switch kind {
-        case .reasoning: return Theme.dim
+        case .reasoning: return Theme.faint
         case .tool: return Theme.accent
-        case .toolDone: return .green
-        case .steer: return Theme.steer
-        case .done: return .green
-        case .error: return .orange
+        case .toolDone: return Theme.ok
+        case .steer: return Theme.accent
+        case .done: return Theme.ok
+        case .error: return Theme.warn
         }
     }
 }

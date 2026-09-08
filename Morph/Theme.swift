@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 extension Color {
     /// Astra picks icon colours as hex, so the grid has to read them.
@@ -18,17 +19,28 @@ extension Color {
     }
 }
 
+/// A quiet instrument. Warm darks rather than pure black, ivory rather than
+/// white, and one accent that only ever means "live right now".
 enum Theme {
-    static let background = Color.black
-    static let surface = Color(white: 0.09)
-    static let hairline = Color(white: 0.22)
-    static let dim = Color(white: 0.55)
-    static let accent = Color(red: 0.45, green: 0.78, blue: 1.0)
-    /// Steering gets its own colour so an interrupt is unmistakable on stage.
-    static let steer = Color(red: 1.0, green: 0.72, blue: 0.30)
-}
+    static let background = Color(red: 0.082, green: 0.078, blue: 0.071)
+    static let surface = Color(red: 0.122, green: 0.116, blue: 0.106)
+    static let raised = Color(red: 0.165, green: 0.157, blue: 0.144)
+    static let hairline = Color(red: 0.245, green: 0.235, blue: 0.215)
 
-import UIKit
+    static let ink = Color(red: 0.953, green: 0.933, blue: 0.894)
+    static let dim = Color(red: 0.612, green: 0.592, blue: 0.553)
+    static let faint = Color(red: 0.40, green: 0.385, blue: 0.36)
+
+    /// Building, steering, anything happening this second.
+    static let accent = Color(red: 1.0, green: 0.478, blue: 0.239)
+    static let accentSoft = Color(red: 1.0, green: 0.478, blue: 0.239).opacity(0.14)
+    /// Steering is the same moment as building, so it wears the same colour.
+    static let steer = accent
+
+    /// Finished work. Muted on purpose; done should feel settled, not loud.
+    static let ok = Color(red: 0.64, green: 0.74, blue: 0.58)
+    static let warn = Color(red: 0.93, green: 0.70, blue: 0.42)
+}
 
 extension Optional where Wrapped == String {
     /// Astra picks the SF Symbol. A name it invented would draw nothing at all,

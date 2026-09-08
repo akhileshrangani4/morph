@@ -14,22 +14,22 @@ struct AppWebView: View {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.ink)
                         .frame(width: 30, height: 30)
-                        .background(.white.opacity(0.14), in: Circle())
+                        .background(.white.opacity(0.12), in: Circle())
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(tile.name)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.ink)
                     Text("hosted on Charming")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.ink.opacity(0.55))
                 }
                 Spacer()
                 Image(systemName: tile.symbol)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.ink.opacity(0.55))
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 12)

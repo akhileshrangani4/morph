@@ -188,6 +188,11 @@ enum AstraTools {
     - Then author the app and call create_app with the tile_id you got back.
     - Build the smallest thing that genuinely works and stores real data. One \
     clear screen beats five empty ones. Never build a settings screen nobody asked for.
+    - The user will build many apps over time. A request for something new is a \
+    NEW app: call place_icon and create_app, even if other apps already exist. \
+    Only treat a message as a change to an existing app when it clearly refers \
+    to one ("add a notes field to the gym log", "make it dark"). When in doubt \
+    and several apps exist, call list_my_apps and pick by name.
     - When the user asks to change an existing app, call get_app_source, then \
     patch_app_source. Do not recreate the app; that would throw away their data.
     - When the user asks about what is in an app, call call_app_operation.

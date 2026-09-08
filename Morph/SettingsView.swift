@@ -25,6 +25,8 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Keys")
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
