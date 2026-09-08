@@ -99,7 +99,10 @@ struct SteerBar: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.steer)
-            TextField("change it while it builds", text: $text)
+            TextField(
+                session.steerRedirects ? "change it while it builds" : "changes land as an edit now",
+                text: $text
+            )
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .foregroundStyle(.white)

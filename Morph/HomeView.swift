@@ -127,8 +127,8 @@ struct HomeView: View {
 
     private var grid: some View {
         LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4),
-            spacing: 20
+            columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
+            spacing: 10
         ) {
             ForEach(store.tiles) { tile in
                 TileView(tile: tile, isEditing: isEditing) { pendingDeletion = tile }
@@ -196,6 +196,7 @@ struct HomeView: View {
     private func rehearse() {
         if !credentials.isConfigured { showSettings = true }
         let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "morphEditMode") { isEditing = true }
         if defaults.bool(forKey: "morphOpenNewest"),
            let newest = store.tiles.last(where: { !$0.isSettling }) {
             openTile = newest
@@ -268,10 +269,13 @@ struct TileView: View {
                             .background(.white, in: Circle())
                             .overlay(Circle().stroke(.black.opacity(0.15), lineWidth: 0.5))
                     }
-                    .offset(x: -7, y: -7)
+                    .offset(x: -9, y: -9)
                     .transition(.scale.combined(with: .opacity))
                 }
             }
+            // Room for the badge to sit outside the icon without the grid cell
+            // clipping it.
+            .padding(10)
             .rotationEffect(.degrees(isEditing && !tile.isSettling ? (jiggle ? 1.6 : -1.6) : 0))
             .animation(
                 isEditing
@@ -286,7 +290,7 @@ struct TileView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .frame(width: 68)
+        .frame(width: 78)
         .onAppear {
             breathing = tile.isSettling
             jiggle = isEditing

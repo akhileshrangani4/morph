@@ -16,6 +16,10 @@ final class AstraSession: ObservableObject {
     @Published var phase: Phase = .idle
     /// True while a response is open, which is the window where steering works.
     @Published var canSteer = false
+    /// Steering cannot rewrite output the model has already sent, so once the
+    /// app source is being written an interrupt arrives as an edit instead of a
+    /// redirect. The bar says which, rather than letting the stage find out.
+    @Published var steerRedirects = true
 
     private let store: TileStore
     private var ws: URLSessionWebSocketTask?
@@ -49,6 +53,7 @@ final class AstraSession: ObservableObject {
         placedTileID = nil
         createdAppID = nil
         guideSentThisTurn = false
+        steerRedirects = true
         turns.append(Turn(prompt: prompt))
 
         // Start each turn on a fresh socket. One left open since the last build
@@ -172,6 +177,7 @@ final class AstraSession: ObservableObject {
                item["type"] as? String == "function_call",
                let name = item["name"] as? String {
                 flushReasoning()
+                if name == "create_app" || name == "patch_app_source" { steerRedirects = false }
                 push(.tool, label(for: name))
             }
 

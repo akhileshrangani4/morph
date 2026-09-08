@@ -14,11 +14,13 @@ struct CharmingClient {
     private func request(
         _ method: String,
         _ path: String,
-        body: Any? = nil
+        body: Any? = nil,
+        ifMatch: String? = nil
     ) async throws -> Any {
         var req = URLRequest(url: Config.charmingBaseURL.appendingPathComponent(path))
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let ifMatch { req.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -54,13 +56,36 @@ struct CharmingClient {
         var body: [String: Any] = ["module": module]
         if let ui { body["ui"] = ui }
         if let styles { body["styles"] = styles }
-        return try await request("PUT", "app/\(id)", body: body) as? [String: Any] ?? [:]
+        let revision = try? await currentRevision(id: id)
+        return try await request("PUT", "app/\(id)", body: body, ifMatch: revision) as? [String: Any] ?? [:]
     }
 
     /// Exact-string edits against the persisted source. Cheaper and faster than
     /// regenerating a whole app when the user asks for one more feature.
+    ///
+    /// The endpoint requires `If-Match` with the app's current revision, so the
+    /// revision is read immediately before patching. That is a concurrency
+    /// detail of the platform, not a decision the model should be making.
     func patchSource(id: String, edits: [[String: Any]]) async throws -> [String: Any] {
-        try await request("PATCH", "app/\(id)/source", body: ["edits": edits]) as? [String: Any] ?? [:]
+        let revision = try await currentRevision(id: id)
+        return try await request(
+            "PATCH",
+            "app/\(id)/source",
+            body: ["edits": edits],
+            ifMatch: revision
+        ) as? [String: Any] ?? [:]
+    }
+
+    /// The app's current revision as an `If-Match` value. The server wants a
+    /// canonical ETag, so the number is quoted: `"1"`, not `1`.
+    func currentRevision(id: String) async throws -> String {
+        let described = try await request("GET", "app/\(id)/describe") as? [String: Any] ?? [:]
+        if let revision = described["revision"] as? Int {
+            return "\"\(revision)\""
+        }
+        let source = try await request("GET", "app/\(id)/source") as? [String: Any] ?? [:]
+        let revision = source["revision"] as? Int ?? 1
+        return "\"\(revision)\""
     }
 
     func getSource(id: String) async throws -> [String: Any] {
