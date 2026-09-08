@@ -4,12 +4,31 @@ import Foundation
 struct Tile: Identifiable, Codable, Equatable {
     var id: String              // Charming app uuid
     var name: String
-    var emoji: String
+    var emoji: String           // the app's own icon on Charming
+    var symbol: String          // SF Symbol drawn on the phone grid
     var bg: String
     var isSettling: Bool        // true while Astra is still working on it
 
-    static func placeholder(name: String) -> Tile {
-        Tile(id: "pending-" + UUID().uuidString, name: name, emoji: "✨", bg: "#1c1c1e", isSettling: true)
+    // Tiles written before the grid moved to SF Symbols have no symbol.
+    enum CodingKeys: String, CodingKey { case id, name, emoji, symbol, bg, isSettling }
+
+    init(id: String, name: String, emoji: String, symbol: String, bg: String, isSettling: Bool) {
+        self.id = id
+        self.name = name
+        self.emoji = emoji
+        self.symbol = symbol
+        self.bg = bg
+        self.isSettling = isSettling
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        emoji = try container.decodeIfPresent(String.self, forKey: .emoji) ?? "✨"
+        symbol = try container.decodeIfPresent(String.self, forKey: .symbol) ?? "square.grid.2x2.fill"
+        bg = try container.decode(String.self, forKey: .bg)
+        isSettling = try container.decode(Bool.self, forKey: .isSettling)
     }
 }
 

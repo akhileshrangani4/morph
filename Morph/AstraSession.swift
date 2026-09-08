@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+let morphLog = Logger(subsystem: "so.charming.morph", category: "astra")
 
 /// The engine. One WebSocket to the Responses API per session.
 ///
@@ -72,15 +75,10 @@ final class AstraSession: ObservableObject {
         }
     }
 
-    /// Authoring a new app is worth real reasoning. Opening or querying one is
-    /// not, and paying for it would show as lag on stage.
-    private func effort(for prompt: String) -> String {
-        let p = prompt.lowercased()
-        if store.tiles.isEmpty { return "high" }
-        if p.hasPrefix("open ") || p.contains("how many") || p.contains("what did") { return "low" }
-        if p.contains("add ") || p.contains("change ") || p.contains("make it ") { return "medium" }
-        return "high"
-    }
+    /// Low across the board. The worked example carries the contract, so the
+    /// model does not have to reason its way to it, and the build stays quick
+    /// enough to watch.
+    private func effort(for prompt: String) -> String { "low" }
 
     // MARK: - Transport
 
@@ -132,6 +130,10 @@ final class AstraSession: ObservableObject {
             let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
             let type = object["type"] as? String
         else { return }
+        morphLog.debug("event \(type, privacy: .public)")
+        if type == "error" || type.hasSuffix(".failed") || type == "response.incomplete" {
+            morphLog.error("raw \(String(text.prefix(900)), privacy: .public)")
+        }
 
         switch type {
         case "response.created":
@@ -190,6 +192,7 @@ final class AstraSession: ObservableObject {
                 .joined(separator: " ")
             canSteer = false
             phase = .done
+            if events.last?.kind == .reasoning { events.removeLast() }
             push(.done, spoken.isEmpty ? "Done" : spoken)
             return
         }
@@ -236,7 +239,9 @@ final class AstraSession: ObservableObject {
                 let raw = call["arguments"] as? String ?? "{}"
                 let args = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any] ?? [:]
 
+                morphLog.debug("tool \(name, privacy: .public) args \(String(raw.prefix(400)), privacy: .public)")
                 let result = await runTool(name: name, args: args)
+                morphLog.debug("tool \(name, privacy: .public) -> \(String(result.prefix(700)), privacy: .public)")
                 markToolDone(name: name, result: result)
                 outputs.append([
                     "type": "function_call_output",
@@ -269,7 +274,8 @@ final class AstraSession: ObservableObject {
                 let tile = Tile(
                     id: "pending-" + UUID().uuidString,
                     name: args["name"] as? String ?? "New app",
-                    emoji: args["emoji"] as? String ?? "✨",
+                    emoji: args["emoji"] as? String ?? "\u{2728}",
+                    symbol: (args["symbol"] as? String).validSymbol,
                     bg: args["bg"] as? String ?? "#2c2c2e",
                     isSettling: true
                 )
@@ -278,8 +284,12 @@ final class AstraSession: ObservableObject {
                 return json(["tile_id": tile.id])
 
             case "create_app":
+                let module = Self.withSchema(args["module"] as? String ?? "")
+                if let complaint = Self.shapeComplaint(module) {
+                    return json(["error": complaint])
+                }
                 let created = try await client.createApp(
-                    module: args["module"] as? String ?? "",
+                    module: module,
                     ui: args["ui"] as? String,
                     styles: args["styles"] as? String,
                     description: args["description"] as? String
@@ -293,6 +303,7 @@ final class AstraSession: ObservableObject {
                     id: appID,
                     name: existing?.name ?? (created["displayName"] as? String ?? "App"),
                     emoji: existing?.emoji ?? "✨",
+                    symbol: existing?.symbol ?? "square.grid.2x2.fill",
                     bg: existing?.bg ?? "#2c2c2e",
                     isSettling: false
                 )
@@ -303,7 +314,16 @@ final class AstraSession: ObservableObject {
                 }
                 // Give the hosted app the same icon the grid is showing.
                 Task { _ = try? await client.setIcon(id: appID, emoji: settled.emoji, bg: settled.bg) }
-                return json(["app_id": appID, "url": created["url"] as? String ?? ""])
+
+                // Charming returns advisories for things that publish fine but
+                // behave badly at runtime. Handing them straight back lets
+                // Astra fix its own app before the user ever taps the icon.
+                var result: [String: Any] = ["app_id": appID, "url": created["url"] as? String ?? ""]
+                if let advisories = created["advisories"] as? [[String: Any]], !advisories.isEmpty {
+                    result["advisories"] = advisories.compactMap { $0["summary"] as? String }
+                    result["next_step"] = "Fix each advisory now with patch_app_source, then stop."
+                }
+                return json(result)
 
             case "patch_app_source":
                 let edits = args["edits"] as? [[String: Any]] ?? []
@@ -322,6 +342,10 @@ final class AstraSession: ObservableObject {
                 )
                 return String(json(value).prefix(20_000))
 
+            case "read_charming_guide":
+                let guide = try await client.authoringGuide()
+                return String(guide.prefix(60_000))
+
             case "list_my_apps":
                 return json(store.tiles.filter { !$0.isSettling }.map {
                     ["app_id": $0.id, "name": $0.name]
@@ -337,6 +361,52 @@ final class AstraSession: ObservableObject {
         }
     }
 
+    /// `$schema` is a fixed string the platform requires and the model kept
+    /// omitting. It is not a judgement call, so Morph supplies it instead of
+    /// spending a retry telling the model to remember it.
+    static func withSchema(_ module: String) -> String {
+        guard !module.contains("$schema") else { return module }
+        guard let range = module.range(of: #"export\s+const\s+manifest\s*=\s*\{"#, options: .regularExpression) else {
+            return module
+        }
+        let schema = "\n  $schema: 'https://charm.ing/schema/app-manifest/2026-07-31.json',"
+        return module.replacingCharacters(in: range, with: module[range] + schema)
+    }
+
+    /// Catches the shapes Astra reaches for when it writes from its priors
+    /// instead of Charming's contract. Rejecting here costs no network round
+    /// trip and gives a far more specific message than a 400 would.
+    static func shapeComplaint(_ module: String) -> String? {
+        guard module.contains("export const manifest") else {
+            return "module must declare `export const manifest = { ... }` as a literal. Re-read the NON-NEGOTIABLE MODULE SHAPE section and rewrite it."
+        }
+        guard module.contains("export const routes") else {
+            return "module must declare `export const routes = [ ... ]` as a literal array of routes with op/method/path/inputSchema/outputSchema/handler."
+        }
+        guard module.contains("$schema") else {
+            return "manifest is missing `$schema: 'https://charm.ing/schema/app-manifest/2026-07-31.json'`."
+        }
+        if module.contains("type: 'collection'") || module.contains("collections:") {
+            return "There is no `collections` concept on Charming. Delete it and write explicit routes whose handlers read and write env.storage."
+        }
+        if module.contains("(ctx)") || module.contains("(ctx,") {
+            return "A handler signature is `async (input, { env }) => ...`. There is no `ctx` argument."
+        }
+        if module.range(of: #"export const routes\s*=\s*\[\s*\]"#, options: .regularExpression) != nil {
+            return "`routes` is empty, so this app does nothing. Write the routes the app actually needs, each with a handler. Do not simplify the app to get past an error: fix the error."
+        }
+        if !module.contains("handler") {
+            return "No route declares a `handler`, so nothing can run. Every route needs `handler: async (input, { env }) => ...`."
+        }
+        if module.contains("localStorage") {
+            return "localStorage is empty inside chat hosts and never syncs. Persist through env.storage instead."
+        }
+        if !module.contains("charming:storage/kv@1.0"), module.contains("env.storage") {
+            return "This app uses env.storage but the manifest omits capabilities.imports: ['charming:storage/kv@1.0'], so every read and write will throw."
+        }
+        return nil
+    }
+
     // MARK: - Strip
 
     private func label(for tool: String) -> String {
@@ -346,6 +416,7 @@ final class AstraSession: ObservableObject {
         case "patch_app_source": return "editing the app in place"
         case "get_app_source": return "reading the current source"
         case "call_app_operation": return "reading the app's data"
+        case "read_charming_guide": return "reading Charming's authoring guide"
         case "list_my_apps": return "checking what you already have"
         default: return tool
         }
@@ -353,24 +424,47 @@ final class AstraSession: ObservableObject {
 
     private func markToolDone(name: String, result: String) {
         let failed = result.contains("\"error\"")
-        if let index = events.lastIndex(where: { $0.kind == .tool && $0.text == label(for: name) }) {
-            events[index].kind = failed ? .error : .toolDone
-            if failed { events[index].detail = "Astra will try to fix this" }
+        guard let index = events.lastIndex(where: { $0.kind == .tool && $0.text == label(for: name) }) else { return }
+        events[index].kind = failed ? .error : .toolDone
+        if failed {
+            // Show what actually broke. Astra gets the same string back and
+            // fixes it, so the strip explains the retry rather than hiding it.
+            events[index].detail = String(reason(from: result).prefix(180))
         }
+    }
+
+    private func reason(from result: String) -> String {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any],
+            let message = object["error"] as? String
+        else { return "Astra will try to fix this" }
+        return message
     }
 
     private func appendReasoning(_ delta: String) {
         reasoningBuffer += delta
-        let trimmed = reasoningBuffer
-            .split(separator: "\n").last.map(String.init) ?? reasoningBuffer
+        let line = Self.currentSentence(of: reasoningBuffer)
         if let id = reasoningLineID, let index = events.firstIndex(where: { $0.id == id }) {
-            events[index].text = String(trimmed.suffix(120))
+            events[index].text = line
         } else {
-            var event = BuildEvent(kind: .reasoning, text: String(trimmed.suffix(120)))
+            let event = BuildEvent(kind: .reasoning, text: line)
             reasoningLineID = event.id
             events.append(event)
-            _ = event
         }
+    }
+
+    /// The strip is a ticker, so it shows one sentence at a time: the one being
+    /// written, or the last finished one between sentences.
+    static func currentSentence(of buffer: String) -> String {
+        let sentences = buffer
+            .replacingOccurrences(of: "\n", with: " ")
+            .split(whereSeparator: { ".!?".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard let last = sentences.last else {
+            return buffer.trimmingCharacters(in: .whitespaces)
+        }
+        return last.count > 150 ? String(last.prefix(150)) + "\u{2026}" : last
     }
 
     private func flushReasoning() {
@@ -403,9 +497,11 @@ final class AstraSession: ObservableObject {
 
     private func loadInstructions() async throws -> String {
         if let instructions { return instructions }
-        let client = CharmingClient(token: Credentials.shared.charmingToken)
-        let guide = try await client.authoringGuide()
-        let combined = AstraTools.preamble + "\n\n---\n\n" + guide
+        // Charming's full guide is ~13k tokens. Carrying it in every turn's
+        // instructions measurably hurt adherence to the one thing that matters,
+        // the module shape, so the prompt keeps the contract and the worked
+        // example and the guide moves behind `read_charming_guide`.
+        let combined = AstraTools.preamble + "\n\n" + AstraTools.contract + "\n\n" + AstraExample.block
         instructions = combined
         return combined
     }

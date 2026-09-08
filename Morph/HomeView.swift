@@ -50,6 +50,11 @@ struct HomeView: View {
         }
         .onAppear {
             if !credentials.isConfigured { showSettings = true }
+            // Rehearsal hook: `-morphPrompt "..."` at launch runs a turn without
+            // typing, so the flow can be exercised from the command line.
+            if let seeded = UserDefaults.standard.string(forKey: "morphPrompt"), !seeded.isEmpty {
+                Task { await session.run(prompt: seeded) }
+            }
         }
     }
 
@@ -157,7 +162,9 @@ struct TileView: View {
                 .fill(Color(hex: tile.bg))
                 .frame(width: 62, height: 62)
                 .overlay(
-                    Text(tile.emoji).font(.system(size: 30))
+                    Image(systemName: tile.symbol)
+                        .font(.system(size: 27, weight: .medium))
+                        .foregroundStyle(.white)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 17, style: .continuous)
