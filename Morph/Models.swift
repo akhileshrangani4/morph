@@ -70,10 +70,13 @@ final class TileStore: ObservableObject {
     }
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: "tiles"),
-           let decoded = try? JSONDecoder().decode([Tile].self, from: data) {
-            tiles = decoded
-        }
+        guard let data = UserDefaults.standard.data(forKey: "tiles"),
+              let decoded = try? JSONDecoder().decode([Tile].self, from: data)
+        else { return }
+        // A tile still settling at launch belongs to a build that never
+        // finished, so there is no app behind it. Dropping it beats leaving a
+        // ghost icon that glows forever and opens nothing.
+        tiles = decoded.filter { !$0.isSettling }
     }
 
     func upsert(_ tile: Tile) {
