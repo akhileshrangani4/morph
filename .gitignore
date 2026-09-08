@@ -1,0 +1,12 @@
+# Secrets: never commit
+Secrets.xcconfig
+*.xcconfig.local
+.env
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+.DS_Store
