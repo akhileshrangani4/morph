@@ -18,14 +18,9 @@ struct AppWebView: View {
                         .frame(width: 30, height: 30)
                         .background(.white.opacity(0.12), in: Circle())
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(tile.name)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
-                    Text("hosted on Charming")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.ink.opacity(0.55))
-                }
+                Text(tile.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
                 Spacer()
                 Image(systemName: tile.symbol)
                     .font(.system(size: 15, weight: .medium))

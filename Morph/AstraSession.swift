@@ -506,11 +506,11 @@ final class AstraSession: ObservableObject {
     private func label(for tool: String) -> String {
         switch tool {
         case "place_icon": return "putting an icon on your grid"
-        case "create_app": return "creating the app on Charming"
+        case "create_app": return "creating the app"
         case "patch_app_source": return "editing the app in place"
         case "get_app_source": return "reading the current source"
         case "call_app_operation": return "reading the app's data"
-        case "read_charming_guide": return "reading Charming's authoring guide"
+        case "read_charming_guide": return "reading the build guide"
         case "list_my_apps": return "checking what you already have"
         default: return tool
         }

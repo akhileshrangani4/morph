@@ -12,14 +12,14 @@ struct SettingsView: View {
                 Section("OpenAI") {
                     SecureField("sk-...", text: $credentials.openAIKey)
                         .textContentType(.password)
-                    Text("Used for GPT-6 Astra over the Responses WebSocket.")
+                    Text("Used for GPT-6 Astra.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Section("Charming") {
+                Section("Hosting") {
                     SecureField("chrm_user_...", text: $credentials.charmingToken)
                         .textContentType(.password)
-                    Text("A personal access token from your Charming account.")
+                    Text("Access token for the hosting account.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
