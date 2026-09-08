@@ -31,6 +31,13 @@ final class AstraSession: ObservableObject {
     private var tiles: [String: String] = [:]
     /// What this turn has actually accomplished, so a steered response can be
     /// resumed with facts instead of assumptions.
+    /// The single line the building pill shows: the newest thing Astra did.
+    var latestLine: String {
+        turns.last?.events.last(where: { $0.kind != .reasoning })?.text
+            ?? turns.last?.events.last?.text
+            ?? "thinking it through"
+    }
+
     private var placedTileID: String?
     private var createdAppID: String?
     private var guideSentThisTurn = false

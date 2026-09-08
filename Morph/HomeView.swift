@@ -10,6 +10,8 @@ struct HomeView: View {
     @State private var pendingDeletion: Tile?
     @State private var isEditing = false
     @State private var showSettings = false
+    @State private var showTranscript = false
+    @State private var hasRehearsed = false
     @FocusState private var promptFocused: Bool
 
     init() {
@@ -24,15 +26,20 @@ struct HomeView: View {
 
             VStack(spacing: 0) {
                 header
-                transcript
-                if session.canSteer {
-                    SteerBar(session: session)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                body(of: content)
+                if session.phase == .working {
+                    BuildingView(
+                        line: session.latestLine,
+                        isExpanded: showTranscript,
+                        onToggle: { withAnimation(.spring(duration: 0.35)) { showTranscript.toggle() } }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 composer
             }
+            .animation(.spring(duration: 0.4), value: session.phase)
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showSettings) { SettingsView() }
@@ -68,6 +75,15 @@ struct HomeView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.accent)
             } else {
+                if !session.turns.isEmpty {
+                    Button {
+                        withAnimation(.spring(duration: 0.35)) { showTranscript.toggle() }
+                    } label: {
+                        Image(systemName: showTranscript ? "text.bubble.fill" : "text.bubble")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(showTranscript ? Theme.accent : Theme.dim)
+                    }
+                }
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 15, weight: .medium))
@@ -80,9 +96,11 @@ struct HomeView: View {
         .padding(.bottom, 16)
     }
 
-    /// Grid and conversation share one scroll view, so the apps sit above the
-    /// talk the way a home screen sits above what you asked for.
-    private var transcript: some View {
+    private func body(of view: some View) -> some View { view }
+
+    /// The grid is the app. The trace of what Astra did is there if you want it,
+    /// and out of the way if you do not.
+    private var content: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
@@ -92,8 +110,12 @@ struct HomeView: View {
                         grid
                     }
 
-                    ForEach(session.turns) { turn in
-                        TurnView(turn: turn).id(turn.id)
+                    if showTranscript {
+                        ForEach(session.turns) { turn in
+                            TurnView(turn: turn)
+                                .id(turn.id)
+                                .transition(.opacity)
+                        }
                     }
 
                     Color.clear.frame(height: 1).id("bottom")
@@ -162,39 +184,55 @@ struct HomeView: View {
             Button(action: submit) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 29))
-                    .foregroundStyle(canSubmit ? Theme.accent : Theme.hairline)
+                    .foregroundStyle(canSubmit ? tint : Theme.hairline)
             }
             .disabled(!canSubmit)
         }
         .padding(.leading, 18)
         .padding(.trailing, 8)
         .padding(.vertical, 9)
-        .background(Theme.surface, in: Capsule())
-        .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
+        .background(session.canSteer ? Theme.steer.opacity(0.10) : Theme.surface, in: Capsule())
+        .overlay(Capsule().stroke(session.canSteer ? Theme.steer.opacity(0.45) : Theme.hairline, lineWidth: 1))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
 
     private var canSubmit: Bool {
-        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && session.phase != .working
+        let typed = !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return typed && (session.phase != .working || session.canSteer)
     }
 
+    private var tint: Color { session.canSteer ? Theme.steer : Theme.accent }
+
     private var placeholder: String {
-        if session.phase == .working { return "building, steer it above" }
+        if session.canSteer {
+            return session.steerRedirects ? "change it while it builds" : "changes land as an edit now"
+        }
+        if session.phase == .working { return "working" }
         return store.tiles.isEmpty ? "what do you need?" : "ask for another, or change one"
     }
 
+    /// One input. While a build is open it interrupts that build; otherwise it
+    /// starts a new one.
     private func submit() {
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         prompt = ""
         promptFocused = false
-        Task { await session.run(prompt: text) }
+        if session.canSteer {
+            session.steer(text)
+        } else {
+            Task { await session.run(prompt: text) }
+        }
     }
 
     /// Launch-time hooks so a run can be rehearsed from the command line.
     private func rehearse() {
         if !credentials.isConfigured { showSettings = true }
+        // onAppear fires again when a full-screen cover dismisses, which would
+        // otherwise kick off a second build behind the first.
+        guard !hasRehearsed else { return }
+        hasRehearsed = true
         let defaults = UserDefaults.standard
         if defaults.bool(forKey: "morphEditMode") { isEditing = true }
         if defaults.bool(forKey: "morphOpenNewest"),
@@ -251,7 +289,8 @@ struct TileView: View {
                         RoundedRectangle(cornerRadius: 17, style: .continuous)
                             .stroke(.white.opacity(0.10), lineWidth: 1)
                     )
-                    .opacity(tile.isSettling && breathing ? 0.45 : 1)
+                    .overlay { if tile.isSettling { SettlingRing() } }
+                    .opacity(tile.isSettling && breathing ? 0.62 : 1)
                     .scaleEffect(tile.isSettling && breathing ? 0.96 : 1)
                     .animation(
                         tile.isSettling
