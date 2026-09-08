@@ -12,8 +12,9 @@ enum Config {
     static let model = "gpt-6-astra"
 }
 
-/// Keys live in UserDefaults so a fresh clone runs without a rebuild and no
-/// secret is ever near the repo. A shipping app would use the Keychain.
+/// Keys come from `Secrets.swift` when it has been filled in locally, and
+/// otherwise from whatever was pasted into the settings sheet. Either way no
+/// secret reaches the repo. A shipping app would use the Keychain.
 final class Credentials: ObservableObject {
     static let shared = Credentials()
 
@@ -27,7 +28,9 @@ final class Credentials: ObservableObject {
     var isConfigured: Bool { !openAIKey.isEmpty && !charmingToken.isEmpty }
 
     private init() {
-        openAIKey = UserDefaults.standard.string(forKey: "openAIKey") ?? ""
-        charmingToken = UserDefaults.standard.string(forKey: "charmingToken") ?? ""
+        let storedKey = UserDefaults.standard.string(forKey: "openAIKey") ?? ""
+        let storedToken = UserDefaults.standard.string(forKey: "charmingToken") ?? ""
+        openAIKey = Secrets.openAIKey.isEmpty ? storedKey : Secrets.openAIKey
+        charmingToken = Secrets.charmingToken.isEmpty ? storedToken : Secrets.charmingToken
     }
 }
