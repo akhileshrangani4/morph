@@ -3,7 +3,7 @@ import Foundation
 struct CharmingError: LocalizedError {
     let status: Int
     let body: String
-    var errorDescription: String? { "Charming \(status): \(body)" }
+    var errorDescription: String? { "Server \(status): \(body)" }
 }
 
 /// Thin client over Charming's public HTTP API. Astra's tools are one-to-one
