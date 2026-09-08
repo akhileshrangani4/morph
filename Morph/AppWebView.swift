@@ -43,6 +43,21 @@ struct CharmingWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
+
+        // The hosted page ships its own chrome: a floating widget in the corner
+        // and an "add to Home Screen" hint. Inside Morph the app already is the
+        // home screen, so both go. The host marks its chrome with data-chrm-*.
+        let hideShell = """
+        (function () {
+          const css = '#charming-widget-root, [data-chrm-install-hint], [data-chrm-app-settings-bottom] { display: none !important; }';
+          const style = document.createElement('style');
+          style.textContent = css;
+          (document.head || document.documentElement).appendChild(style);
+        })();
+        """
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: hideShell, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        )
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.isOpaque = false
         view.backgroundColor = .clear
