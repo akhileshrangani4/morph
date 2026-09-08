@@ -52,6 +52,12 @@ struct HomeView: View {
             if !credentials.isConfigured { showSettings = true }
             // Rehearsal hook: `-morphPrompt "..."` at launch runs a turn without
             // typing, so the flow can be exercised from the command line.
+            // Rehearsal hook: open the newest app straight away, to check the
+            // webview without a tap.
+            if UserDefaults.standard.bool(forKey: "morphOpenNewest"),
+               let newest = store.tiles.last(where: { !$0.isSettling }) {
+                openTile = newest
+            }
             if let seeded = UserDefaults.standard.string(forKey: "morphPrompt"), !seeded.isEmpty {
                 Task { await session.run(prompt: seeded) }
                 // `-morphSteerText` plus `-morphSteerAfter` rehearses the

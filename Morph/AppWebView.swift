@@ -7,27 +7,37 @@ struct AppWebView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Color(hex: tile.bg).ignoresSafeArea()
-            CharmingWebView(appID: tile.id)
-                .ignoresSafeArea(edges: .bottom)
-
-            HStack(spacing: 10) {
+        VStack(spacing: 0) {
+            // A bar above the app rather than floating over it: the generated
+            // app draws its own header, and an overlay collided with it.
+            HStack(spacing: 12) {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(.white.opacity(0.14), in: Circle())
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(tile.name)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(9)
-                        .background(.black.opacity(0.45), in: Circle())
+                    Text("hosted on Charming")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.55))
                 }
-                Text(tile.name)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 6)
                 Spacer()
+                Image(systemName: tile.symbol)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
             }
             .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+            .background(Color(hex: tile.bg))
+
+            CharmingWebView(appID: tile.id)
         }
+        .background(Color(hex: tile.bg))
         .preferredColorScheme(.dark)
     }
 }
