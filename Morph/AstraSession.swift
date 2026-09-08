@@ -12,7 +12,7 @@ let morphLog = Logger(subsystem: "so.charming.morph", category: "astra")
 final class AstraSession: ObservableObject {
     enum Phase: Equatable { case idle, working, done, failed(String) }
 
-    @Published var events: [BuildEvent] = []
+    @Published var turns: [Turn] = []
     @Published var phase: Phase = .idle
     /// True while a response is open, which is the window where steering works.
     @Published var canSteer = false
@@ -29,6 +29,12 @@ final class AstraSession: ObservableObject {
     /// resumed with facts instead of assumptions.
     private var placedTileID: String?
     private var createdAppID: String?
+    private var guideSentThisTurn = false
+    /// The tail of the conversation. Passing it as `previous_response_id` on the
+    /// next turn is what makes "now make it dark" mean anything: Astra still has
+    /// the app it just built. It also means instructions are sent once, not
+    /// re-sent with every turn.
+    private var conversationTail: String?
 
     init(store: TileStore) {
         self.store = store
@@ -37,26 +43,39 @@ final class AstraSession: ObservableObject {
     // MARK: - Turns
 
     func run(prompt: String) async {
-        events.removeAll()
         phase = .working
         reasoningLineID = nil
         reasoningBuffer = ""
         placedTileID = nil
         createdAppID = nil
+        guideSentThisTurn = false
+        turns.append(Turn(prompt: prompt))
+
+        // Start each turn on a fresh socket. One left open since the last build
+        // may be dead without ever reporting a close code, and that would
+        // surface as a failure on the first send of the new build. Steering only
+        // needs one connection within a turn, and the conversation itself lives
+        // server-side behind previous_response_id.
+        ws?.cancel()
+        ws = nil
 
         do {
-            let instr = try await loadInstructions()
             try connectIfNeeded()
-            push(.reasoning, "Astra is listening", detail: "effort: \(effort(for: prompt))")
-            try await send([
+            var payload: [String: Any] = [
                 "type": "response.create",
                 "model": Config.model,
                 "store": true,
                 "reasoning": ["effort": effort(for: prompt)],
-                "instructions": instr,
                 "tools": AstraTools.all(),
                 "input": prompt,
-            ])
+            ]
+            if let conversationTail {
+                payload["previous_response_id"] = conversationTail
+            } else {
+                payload["instructions"] = try await loadInstructions()
+            }
+            push(.reasoning, "Astra is listening")
+            try await send(payload)
             canSteer = true
         } catch {
             fail(error.localizedDescription)
@@ -67,7 +86,8 @@ final class AstraSession: ObservableObject {
     /// work and folds this into the continuation.
     func steer(_ text: String) {
         guard let id = currentResponseID else { return }
-        push(.steer, "\u{201C}\(text)\u{201D}", detail: "steering a build already in flight")
+        turns.append(Turn(prompt: text, isSteer: true))
+        push(.steer, "sent while it was still building")
         Task {
             do {
                 try await send([
@@ -198,7 +218,8 @@ final class AstraSession: ObservableObject {
                 .joined(separator: " ")
             canSteer = false
             phase = .done
-            if events.last?.kind == .reasoning { events.removeLast() }
+            conversationTail = id
+            if lastEventKind == .reasoning { dropLastEvent() }
             push(.done, spoken.isEmpty ? "Done" : Self.plainText(spoken))
             return
         }
@@ -220,6 +241,18 @@ final class AstraSession: ObservableObject {
             return
         }
         push(.reasoning, "picking up with the change")
+
+        // A steer interrupts wherever the model happens to be. If it had
+        // already emitted tool calls, those must be answered: the server
+        // prepends the queued steer to the continuation carrying their output.
+        // Only when there are none does the turn resume on a plain message.
+        let output = response?["output"] as? [[String: Any]] ?? []
+        let calls = output.filter { $0["type"] as? String == "function_call" }
+        if !calls.isEmpty {
+            execute(calls: calls, previousResponseID: id)
+            return
+        }
+
         Task {
             do {
                 try await send([
@@ -376,7 +409,13 @@ final class AstraSession: ObservableObject {
                 return String(json(value).prefix(20_000))
 
             case "read_charming_guide":
+                // Every successful run called this twice, which is two 13k-token
+                // round trips for the same bytes.
+                if guideSentThisTurn {
+                    return json(["note": "The guide is already in this conversation above. Re-read it there and carry on."])
+                }
                 let guide = try await client.authoringGuide()
+                guideSentThisTurn = true
                 return String(guide.prefix(60_000))
 
             case "list_my_apps":
@@ -440,6 +479,15 @@ final class AstraSession: ObservableObject {
         return nil
     }
 
+    /// Removes the app from Charming as well as the grid. The tile is the app;
+    /// leaving one behind without the other is the confusing outcome.
+    func delete(_ tile: Tile) async {
+        store.remove(tile.id)
+        guard !tile.id.hasPrefix("pending-") else { return }
+        let client = CharmingClient(token: Credentials.shared.charmingToken)
+        try? await client.deleteApp(id: tile.id)
+    }
+
     // MARK: - Strip
 
     private func label(for tool: String) -> String {
@@ -457,12 +505,17 @@ final class AstraSession: ObservableObject {
 
     private func markToolDone(name: String, result: String) {
         let failed = result.contains("\"error\"")
-        guard let index = events.lastIndex(where: { $0.kind == .tool && $0.text == label(for: name) }) else { return }
-        events[index].kind = failed ? .error : .toolDone
+        guard !turns.isEmpty,
+              let index = turns[turns.count - 1].events.lastIndex(where: {
+                  $0.kind == .tool && $0.text == label(for: name)
+              })
+        else { return }
+        let turn = turns.count - 1
+        turns[turn].events[index].kind = failed ? .error : .toolDone
         if failed {
             // Show what actually broke. Astra gets the same string back and
             // fixes it, so the strip explains the retry rather than hiding it.
-            events[index].detail = String(reason(from: result).prefix(180))
+            turns[turn].events[index].detail = String(reason(from: result).prefix(180))
         }
     }
 
@@ -477,12 +530,15 @@ final class AstraSession: ObservableObject {
     private func appendReasoning(_ delta: String) {
         reasoningBuffer += delta
         let line = Self.currentSentence(of: Self.plainText(reasoningBuffer))
-        if let id = reasoningLineID, let index = events.firstIndex(where: { $0.id == id }) {
-            events[index].text = line
+        guard !turns.isEmpty else { return }
+        let turn = turns.count - 1
+        if let id = reasoningLineID,
+           let index = turns[turn].events.firstIndex(where: { $0.id == id }) {
+            turns[turn].events[index].text = line
         } else {
             let event = BuildEvent(kind: .reasoning, text: line)
             reasoningLineID = event.id
-            events.append(event)
+            turns[turn].events.append(event)
         }
     }
 
@@ -522,7 +578,24 @@ final class AstraSession: ObservableObject {
     }
 
     private func push(_ kind: BuildEvent.Kind, _ text: String, detail: String? = nil) {
-        events.append(BuildEvent(kind: kind, text: text, detail: detail))
+        guard !turns.isEmpty else { return }
+        turns[turns.count - 1].events.append(BuildEvent(kind: kind, text: text, detail: detail))
+    }
+
+    private var lastEventKind: BuildEvent.Kind? {
+        turns.last?.events.last?.kind
+    }
+
+    private func dropLastEvent() {
+        guard !turns.isEmpty, !turns[turns.count - 1].events.isEmpty else { return }
+        turns[turns.count - 1].events.removeLast()
+    }
+
+    /// Mutates the event most recently pushed in the current turn.
+    private func updateLastEvent(_ change: (inout BuildEvent) -> Void) {
+        guard !turns.isEmpty, !turns[turns.count - 1].events.isEmpty else { return }
+        let last = turns[turns.count - 1].events.count - 1
+        change(&turns[turns.count - 1].events[last])
     }
 
     private func fail(_ message: String) {

@@ -77,6 +77,10 @@ struct CharmingClient {
         try await request("POST", "app/\(id)/api/\(operation)", body: payload)
     }
 
+    func deleteApp(id: String) async throws {
+        _ = try await request("DELETE", "app/\(id)")
+    }
+
     func listApps() async throws -> Any {
         try await request("GET", "app")
     }

@@ -55,6 +55,14 @@ struct BuildEvent: Identifiable, Equatable {
     }
 }
 
+/// One exchange: what the user asked, and everything Astra did about it.
+struct Turn: Identifiable, Equatable {
+    let id = UUID()
+    var prompt: String
+    var events: [BuildEvent] = []
+    var isSteer: Bool = false
+}
+
 /// Home-grid persistence. Small enough that UserDefaults is the right call.
 final class TileStore: ObservableObject {
     @Published var tiles: [Tile] = [] {
