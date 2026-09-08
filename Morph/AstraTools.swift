@@ -39,6 +39,8 @@ enum AstraTools {
                         "ui": ["type": "string", "description": "Inline classic script that populates #app."],
                         "styles": ["type": "string", "description": "CSS injected alongside ui."],
                         "description": ["type": "string", "description": "One-line description of the app."],
+                        "name": ["type": "string", "description": "Only if the app is no longer what the tile says, e.g. after the user changed their mind mid-build. Renames the tile."],
+                        "symbol": ["type": "string", "description": "Only if the app changed enough that the tile's icon no longer fits. A valid SF Symbol name."],
                     ],
                     "required": ["tile_id", "module", "ui", "styles", "description"],
                     "additionalProperties": false,
@@ -190,7 +192,11 @@ enum AstraTools {
     patch_app_source. Do not recreate the app; that would throw away their data.
     - When the user asks about what is in an app, call call_app_operation.
     - The user may interrupt you mid-build to change what they want. When that \
-    happens, keep everything already finished and adapt the rest. Do not start over.
+    happens, keep everything already finished and adapt the rest. Do not start over. \
+    If the change means the tile's name or icon no longer fits, pass a new `name` \
+    and `symbol` to create_app so the grid matches what you actually built.
+    - Write compactly. One screen that works beats five that do not: aim for a \
+    module under 150 lines and a ui under 120. You are being watched while you write.
     - If a call fails, read the error, fix your source, and try again yourself.
 
     Design the app to look at home on a phone: large tap targets, one column, \

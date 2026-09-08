@@ -54,6 +54,16 @@ struct HomeView: View {
             // typing, so the flow can be exercised from the command line.
             if let seeded = UserDefaults.standard.string(forKey: "morphPrompt"), !seeded.isEmpty {
                 Task { await session.run(prompt: seeded) }
+                // `-morphSteerText` plus `-morphSteerAfter` rehearses the
+                // interrupt: the same path the steer bar uses, fired on a timer.
+                let steer = UserDefaults.standard.string(forKey: "morphSteerText") ?? ""
+                let after = UserDefaults.standard.double(forKey: "morphSteerAfter")
+                if !steer.isEmpty, after > 0 {
+                    Task {
+                        try? await Task.sleep(for: .seconds(after))
+                        session.steer(steer)
+                    }
+                }
             }
         }
     }

@@ -25,6 +25,10 @@ final class AstraSession: ObservableObject {
     private var reasoningBuffer = ""
     /// Maps the tile_id Astra was handed to the tile sitting on the grid.
     private var tiles: [String: String] = [:]
+    /// What this turn has actually accomplished, so a steered response can be
+    /// resumed with facts instead of assumptions.
+    private var placedTileID: String?
+    private var createdAppID: String?
 
     init(store: TileStore) {
         self.store = store
@@ -37,6 +41,8 @@ final class AstraSession: ObservableObject {
         phase = .working
         reasoningLineID = nil
         reasoningBuffer = ""
+        placedTileID = nil
+        createdAppID = nil
 
         do {
             let instr = try await loadInstructions()
@@ -193,7 +199,7 @@ final class AstraSession: ObservableObject {
             canSteer = false
             phase = .done
             if events.last?.kind == .reasoning { events.removeLast() }
-            push(.done, spoken.isEmpty ? "Done" : spoken)
+            push(.done, spoken.isEmpty ? "Done" : Self.plainText(spoken))
             return
         }
         guard let id else { return }
@@ -222,12 +228,29 @@ final class AstraSession: ObservableObject {
                     "store": true,
                     "previous_response_id": id,
                     "tools": AstraTools.all(),
-                    "input": "Continue, applying the change I just sent. Keep what you already finished.",
+                    "input": progressReport(),
                 ])
             } catch {
                 fail(error.localizedDescription)
             }
         }
+    }
+
+    /// Exactly what is and is not done, so the resumed turn does not invent
+    /// state. The model reads this immediately after a steer.
+    private func progressReport() -> String {
+        var lines = ["Apply the change I just sent, keeping the work you already finished. Here is exactly where you are:"]
+        if let placedTileID {
+            lines.append("- A tile is on the grid with tile_id \(placedTileID). Reuse it; do not call place_icon again.")
+        } else {
+            lines.append("- No tile on the grid yet. Call place_icon first.")
+        }
+        if let createdAppID {
+            lines.append("- The app EXISTS with app_id \(createdAppID). Change it with get_app_source then patch_app_source. Do NOT call create_app again.")
+        } else {
+            lines.append("- No app has been created yet: every create_app call so far either failed or never ran. There is no source to read, so do NOT call get_app_source. Author the app with the change folded in and call create_app once.")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func execute(calls: [[String: Any]], previousResponseID: String) {
@@ -281,6 +304,7 @@ final class AstraSession: ObservableObject {
                 )
                 store.upsert(tile)
                 tiles[tile.id] = tile.id
+                placedTileID = tile.id
                 return json(["tile_id": tile.id])
 
             case "create_app":
@@ -299,11 +323,15 @@ final class AstraSession: ObservableObject {
                 }
                 let tileID = args["tile_id"] as? String
                 let existing = store.tiles.first { $0.id == tileID }
+                // A steered build can end up as a different app than the tile
+                // announced, so Astra may rename and re-icon it here.
                 let settled = Tile(
                     id: appID,
-                    name: existing?.name ?? (created["displayName"] as? String ?? "App"),
+                    name: (args["name"] as? String) ?? existing?.name ?? (created["displayName"] as? String ?? "App"),
                     emoji: existing?.emoji ?? "✨",
-                    symbol: existing?.symbol ?? "square.grid.2x2.fill",
+                    symbol: args["symbol"] == nil
+                        ? (existing?.symbol ?? "square.grid.2x2.fill")
+                        : (args["symbol"] as? String).validSymbol,
                     bg: existing?.bg ?? "#2c2c2e",
                     isSettling: false
                 )
@@ -318,6 +346,7 @@ final class AstraSession: ObservableObject {
                 // Charming returns advisories for things that publish fine but
                 // behave badly at runtime. Handing them straight back lets
                 // Astra fix its own app before the user ever taps the icon.
+                createdAppID = appID
                 var result: [String: Any] = ["app_id": appID, "url": created["url"] as? String ?? ""]
                 if let advisories = created["advisories"] as? [[String: Any]], !advisories.isEmpty {
                     result["advisories"] = advisories.compactMap { $0["summary"] as? String }
@@ -331,7 +360,11 @@ final class AstraSession: ObservableObject {
                 return json(["ok": true, "revision": result["revision"] ?? 0])
 
             case "get_app_source":
-                let source = try await client.getSource(id: args["app_id"] as? String ?? "")
+                let appID = args["app_id"] as? String ?? ""
+                guard !appID.isEmpty, !appID.hasPrefix("pending-") else {
+                    return json(["error": "No such app. A tile_id is not an app_id, and no app has been created yet, so there is no source to read."])
+                }
+                let source = try await client.getSource(id: appID)
                 return String(json(source).prefix(60_000))
 
             case "call_app_operation":
@@ -443,7 +476,7 @@ final class AstraSession: ObservableObject {
 
     private func appendReasoning(_ delta: String) {
         reasoningBuffer += delta
-        let line = Self.currentSentence(of: reasoningBuffer)
+        let line = Self.currentSentence(of: Self.plainText(reasoningBuffer))
         if let id = reasoningLineID, let index = events.firstIndex(where: { $0.id == id }) {
             events[index].text = line
         } else {
@@ -451,6 +484,22 @@ final class AstraSession: ObservableObject {
             reasoningLineID = event.id
             events.append(event)
         }
+    }
+
+    /// The model writes for a chat window; the strip is not one. Strip the
+    /// markdown rather than showing raw asterisks and link syntax on stage.
+    static func plainText(_ text: String) -> String {
+        var output = text.replacingOccurrences(
+            of: #"\[([^\]]+)\]\([^)]+\)"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        output = output.replacingOccurrences(of: "**", with: "")
+        output = output.replacingOccurrences(of: "`", with: "")
+        output = output.replacingOccurrences(
+            of: #"\n{2,}"#, with: " ", options: .regularExpression
+        )
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The strip is a ticker, so it shows one sentence at a time: the one being
